@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Typing Rain</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #050510;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Ambient Rain Animation for background */
+        .rain-layer {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+            background-image: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0.1));
+            background-size: 100% 100%;
+        }
+
+        /* The Falling Word Entities */
+        .word-drop {
+            position: absolute;
+            color: #00f3ff;
+            text-shadow: 0 0 5px #00f3ff, 0 0 10px #0077ff;
+            font-size: 1.1rem;
+            font-weight: bold;
+            white-space: nowrap;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: rgba(0, 20, 40, 0.6);
+            border: 1px solid rgba(0, 243, 255, 0.2);
+            transition: transform 0.1s, color 0.2s;
+            z-index: 10;
+        }
+        
+        .word-drop.matched {
+            color: #ff0055;
+            text-shadow: 0 0 5px #ff0055, 0 0 10px #ff0000;
+            border-color: rgba(255, 0, 85, 0.5);
+            z-index: 20;
+        }
+
+        .word-drop.highlight {
+            background: rgba(0, 243, 255, 0.15);
+            border-color: #00f3ff;
+        }
+
+        /* City Skyline generated via CSS/JS */
+        .city-layer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 200px;
+            z-index: 5;
+            display: flex;
+            align-items: flex-end;
+            pointer-events: none;
+        }
+        
+        .building {
+            background: #02020a;
+            border-top: 2px solid #1a1a2e;
+            border-left: 1px solid #1a1a2e;
+            border-right: 1px solid #1a1a2e;
+            position: relative;
+            z-index: 5;
+        }
+        
+        .building::after {
+            /* Windows */
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 10%;
+            width: 80%;
+            height: 80%;
+            background-image: radial-gradient(#1a1a40 20%, transparent 20%), radial-gradient(#050510 20%, transparent 20%);
+            background-size: 8px 12px;
+            background-position: 0 0, 4px 6px;
+            opacity: 0.5;
+        }
+
+        /* Input Zone */
+        .input-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            z-index: 50;
+        }
+
+        .glass-panel {
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Particle effects for destroyed words */
+        .particle {
+            position: absolute;
+            background: #00f3ff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 15;
+        }
+
+        /* Custom scrollbar for stats if needed */
+        ::-webkit-scrollbar {
+            width: 0;
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 0, 85, 0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(255, 0, 85, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 0, 85, 0); }
+        }
+
+        .damage-effect {
+            animation: pulse-red 0.5s linear;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+
+    <!-- Ambient Background Canvas (Rain) -->
+    <canvas id="rainCanvas" class="absolute top-0 left-0 w-full h-full z-0 opacity-30"></canvas>
+
+    <!-- UI Overlay -->
+    <div class="absolute top-0 left-0 w-full p-6 flex justify-between items-start z-40 pointer-events-none">
+        <div class="flex flex-col gap-2">
+            <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 tracking-tighter filter drop-shadow-lg">
+                TYPING RAIN
+            </h1>
+            <div class="glass-panel px-4 py-2 rounded-lg text-cyan-100 text-sm border-l-4 border-cyan-500">
+                <p>Level: <span id="level-display" class="font-bold text-white">1</span></p>
+                <p class="text-xs text-gray-400">Wind Speed: <span id="speed-display">Normal</span></p>
+            </div>
+        </div>
+
+        <div class="flex gap-4">
+            <div class="glass-panel px-6 py-3 rounded-lg text-center min-w-[100px]">
+                <p class="text-xs text-gray-400 uppercase tracking-widest">Score</p>
+                <p id="score-display" class="text-2xl font-bold text-white">0</p>
+            </div>
+            <div class="glass-panel px-6 py-3 rounded-lg text-center min-w-[100px]">
+                <p class="text-xs text-gray-400 uppercase tracking-widest">Accuracy</p>
+                <p id="accuracy-display" class="text-2xl font-bold text-emerald-400">100%</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lives Container (Bottom Right) -->
+    <div class="absolute bottom-6 right-6 z-40 flex flex-col items-end gap-1">
+        <p class="text-xs text-gray-400 uppercase tracking-widest bg-black/50 px-2 rounded">City Shield</p>
+        <div class="flex gap-1" id="lives-container">
+            <!-- Hearts injected by JS -->
+        </div>
+    </div>
+
+    <!-- City Skyline Layer -->
+    <div id="city-layer" class="city-layer">
+        <!-- Buildings injected by JS -->
+    </div>
+
+    <!-- Game Area where words fall -->
+    <div id="game-area" class="absolute top-0 left-0 w-full h-full z-10 overflow-hidden pointer-events-none"></div>
+
+    <!-- Input Area -->
+    <div class="input-zone z-50">
+        <div class="relative group">
+            <div class="absolute -inset-1 bg-gradient-to-r from-cyan-400 to-blue-600 rounded-lg blur opacity-25 group-hover:opacity-75 transition duration-1000 group-hover:duration-200"></div>
+            <input type="text" id="player-input" 
+                class="relative w-full bg-gray-900 text-cyan-300 font-bold text-center text-xl py-3 px-4 rounded-lg border border-gray-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 shadow-2xl placeholder-gray-600 uppercase tracking-widest"
+                placeholder="TYPE HERE" autocomplete="off" spellcheck="false" autofocus>
+        </div>
+    </div>
+
+    <!-- Start / Game Over Modal -->
+    <div id="modal-overlay" class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex justify-center items-center">
+        <div class="glass-panel p-8 rounded-2xl max-w-md w-full text-center border border-cyan-500/30 shadow-[0_0_50px_rgba(0,243,255,0.2)]">
+            <h2 id="modal-title" class="text-4xl font-bold text-white mb-2">NEON STORM</h2>
+            <p id="modal-desc" class="text-gray-300 mb-6">Defend the city from the data rain.</p>
+            
+            <div id="stats-summary" class="hidden mb-6 grid grid-cols-2 gap-4 text-left bg-black/40 p-4 rounded-lg">
+                <div>
+                    <p class="text-xs text-gray-500">Final Score</p>
+                    <p id="final-score" class="text-xl text-white">0</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Precision</p>
+                    <p id="final-accuracy" class="text-xl text-emerald-400">0%</p>
+                </div>
+                <div class="col-span-2">
+                    <p class="text-xs text-gray-500">Highest Streak</p>
+                    <p id="final-streak" class="text-xl text-cyan-400">0</p>
+                </div>
+            </div>
+
+            <button id="start-btn" class="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg transition-all transform hover:scale-[1.02] shadow-lg hover:shadow-cyan-500/50">
+                INITIATE SYSTEM
+            </button>
+        </div>
+    </div>
+
+    <!-- Audio Elements (Optional sounds could go here, keeping silent for now) -->
+
+    <script>
+        /**
+         * WORD BANK
+         * A mix of tech, rain, and cyberpunk thematic words.
+         */
+        const WORD_LIST = [
+            "rain", "storm", "cloud", "thunder", "neon", "cyber", "city", "night", "dark",
+            "glow", "flux", "grid", "node", "data", "link", "core", "code", "byte", "bit",
+            "hack", "sync", "void", "null", "echo", "ping", "host", "root", "user", "pass",
+            "key", "lock", "wall", "fire", "ice", "mist", "fog", "haze", "blur", "pixel",
+            "vector", "matrix", "logic", "stack", "heap", "queue", "array", "loop", "func",
+            "class", "object", "scope", "token", "parse", "render", "shader", "buffer",
+            "frame", "layer", "mask", "path", "route", "trace", "debug", "compile", "build",
+            "deploy", "shell", "bash", "terminal", "console", "script", "syntax", "error",
+            "warning", "fatal", "crash", "glitch", "bug", "patch", "update", "upgrade",
+            "system", "kernel", "memory", "drive", "disk", "cloud", "server", "client",
+            "proxy", "socket", "port", "stream", "channel", "signal", "pulse", "wave",
+            "frequency", "bandwidth", "latency", "jitter", "packet", "frame", "header",
+            "payload", "footer", "checksum", "hash", "crypto", "cipher", "block", "chain",
+            "algorithm", "heuristic", "pattern", "model", "neural", "network", "deep",
+            "learning", "machine", "vision", "speech", "natural", "language", "processing",
+            "robotic", "android", "cyborg", "bionic", "implant", "augment", "virtual",
+            "reality", "mixed", "augment", "digital", "analog", "quantum", "atomic",
+            "nuclear", "fusion", "fission", "plasma", "laser", "optic", "fiber", "glass"
+        ];
+
+        /**
+         * GAME CONFIGURATION
+         */
+        const CONFIG = {
+            initialSpeed: 1,      // Pixels per frame
+            spawnRate: 2000,      // MS between spawns initially
+            speedIncrement: 0.1,  // Speed increase per level
+            rateDecrement: 100,   // Spawn rate decrease per level
+            maxLives: 5,
+            levelThreshold: 10,   // Words to clear to level up
+        };
+
+        /**
+         * GAME STATE
+         */
+        let state = {
+            active: false,
+            paused: false,
+            score: 0,
+            lives: CONFIG.maxLives,
+            level: 1,
+            wordsCleared: 0,
+            keystrokesTotal: 0,
+            keystrokesCorrect: 0,
+            streak: 0,
+            maxStreak: 0,
+            activeWords: [], // Array of objects { id, word, x, y, el, speedMultiplier }
+            lastSpawnTime: 0,
+            spawnTimer: CONFIG.spawnRate,
+            baseSpeed: CONFIG.initialSpeed
+        };
+
+        // DOM Elements
+        const gameArea = document.getElementById('game-area');
+        const input = document.getElementById('player-input');
+        const scoreEl = document.getElementById('score-display');
+        const accuracyEl = document.getElementById('accuracy-display');
+        const levelEl = document.getElementById('level-display');
+        const speedEl = document.getElementById('speed-display');
+        const livesContainer = document.getElementById('lives-container');
+        const modal = document.getElementById('modal-overlay');
+        const startBtn = document.getElementById('start-btn');
+        const modalTitle = document.getElementById('modal-title');
+        const modalDesc = document.getElementById('modal-desc');
+        const statsSummary = document.getElementById('stats-summary');
+
+        // --- AUDIO ENGINE (Web Audio API) ---
+        let audioCtx;
+        
+        const initAudio = () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        };
+
+        const playSound = (type) => {
+            if (!audioCtx) return;
+            
+            const now = audioCtx.currentTime;
+            
+            if (type === 'type') {
+                // High-pitched mechanical click
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(1200, now + 0.05);
+                
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+                
+                osc.start(now);
+                osc.stop(now + 0.05);
+
+            } else if (type === 'match') {
+                // Retro laser zap
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+                
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+                
+                osc.start(now);
+                osc.stop(now + 0.15);
+
+            } else if (type === 'damage') {
+                // Low impact thud
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
+                
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                
+                osc.start(now);
+                osc.stop(now + 0.3);
+
+            } else if (type === 'levelup') {
+                // Ascending arpeggio
+                const notes = [440, 554, 659, 880]; // A Major ish
+                notes.forEach((freq, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    
+                    osc.type = 'triangle';
+                    osc.frequency.value = freq;
+                    
+                    const startTime = now + (i * 0.08);
+                    gain.gain.setValueAtTime(0, startTime);
+                    gain.gain.linearRampToValueAtTime(0.1, startTime + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.4);
+                    
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.4);
+                });
+
+            } else if (type === 'gameover') {
+                // Power down slide
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(10, now + 1.5);
+                
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0, now + 1.5);
+                
+                osc.start(now);
+                osc.stop(now + 1.5);
+            }
+        };
+
+        /**
+         * INITIALIZATION
+         */
+        function init() {
+            generateCity();
+            initRain(); // Background canvas rain
+            renderLives();
+            
+            startBtn.addEventListener('click', () => {
+                initAudio(); // Initialize audio context on user gesture
+                startGame();
+            });
+            input.addEventListener('input', handleInput);
+            input.addEventListener('keydown', (e) => {
+                // Play typing sound
+                if (state.active && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                    playSound('type');
+                }
+
+                // Track total keystrokes (ignoring non-char keys roughly)
+                if (state.active && e.key.length === 1) {
+                    state.keystrokesTotal++;
+                    updateStats();
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                // Resize canvas
+                const canvas = document.getElementById('rainCanvas');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                generateCity(); // Regenerate city on resize
+            });
+        }
+
+        /**
+         * VISUALS GENERATOR
+         */
+        function generateCity() {
+            const cityLayer = document.getElementById('city-layer');
+            cityLayer.innerHTML = '';
+            const width = window.innerWidth;
+            let currentX = 0;
+            
+            while (currentX < width) {
+                const w = 30 + Math.random() * 80;
+                const h = 50 + Math.random() * 150;
+                const building = document.createElement('div');
+                building.className = 'building';
+                building.style.width = `${w}px`;
+                building.style.height = `${h}px`;
+                building.style.marginLeft = `-${Math.random() * 10}px`; // Overlap slightly
+                cityLayer.appendChild(building);
+                currentX += (w - 5);
+            }
+        }
+
+        // Background Rain on Canvas
+        let rainCtx, rainDrops = [];
+        function initRain() {
+            const canvas = document.getElementById('rainCanvas');
+            rainCtx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            for(let i=0; i<100; i++) {
+                rainDrops.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    l: Math.random() * 20 + 10,
+                    v: Math.random() * 5 + 2
+                });
+            }
+            animateRain();
+        }
+
+        function animateRain() {
+            rainCtx.clearRect(0, 0, rainCtx.canvas.width, rainCtx.canvas.height);
+            rainCtx.strokeStyle = 'rgba(0, 243, 255, 0.15)';
+            rainCtx.lineWidth = 1;
+            rainCtx.beginPath();
+            
+            for(let d of rainDrops) {
+                rainCtx.moveTo(d.x, d.y);
+                rainCtx.lineTo(d.x, d.y + d.l);
+                d.y += d.v;
+                if(d.y > rainCtx.canvas.height) {
+                    d.y = -20;
+                    d.x = Math.random() * rainCtx.canvas.width;
+                }
+            }
+            rainCtx.stroke();
+            requestAnimationFrame(animateRain);
+        }
+
+        /**
+         * GAME LOGIC
+         */
+        function startGame() {
+            // Reset State
+            state = {
+                active: true,
+                paused: false,
+                score: 0,
+                lives: CONFIG.maxLives,
+                level: 1,
+                wordsCleared: 0,
+                keystrokesTotal: 0,
+                keystrokesCorrect: 0,
+                streak: 0,
+                maxStreak: 0,
+                activeWords: [],
+                lastSpawnTime: performance.now(),
+                spawnTimer: CONFIG.spawnRate,
+                baseSpeed: CONFIG.initialSpeed
+            };
+
+            // Reset UI
+            modal.classList.add('hidden');
+            statsSummary.classList.add('hidden');
+            gameArea.innerHTML = '';
+            input.value = '';
+            input.focus();
+            updateStats();
+            renderLives();
+
+            // Start Loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameOver() {
+            state.active = false;
+            playSound('gameover');
+            modalTitle.innerText = "SYSTEM FAILURE";
+            modalDesc.innerText = "The city defenses have been breached.";
+            
+            document.getElementById('final-score').innerText = state.score;
+            document.getElementById('final-accuracy').innerText = calculateAccuracy() + "%";
+            document.getElementById('final-streak').innerText = state.maxStreak;
+            
+            statsSummary.classList.remove('hidden');
+            startBtn.innerText = "REBOOT SYSTEM";
+            modal.classList.remove('hidden');
+        }
+
+        function spawnWord() {
+            const wordText = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+            
+            // Avoid duplicates on screen if possible
+            if (state.activeWords.some(w => w.word === wordText)) return;
+
+            const el = document.createElement('div');
+            el.className = 'word-drop';
+            el.innerText = wordText;
+            
+            // Random Position
+            const maxLeft = window.innerWidth - 150; // buffer
+            const left = Math.max(20, Math.random() * maxLeft);
+            
+            el.style.left = `${left}px`;
+            el.style.top = `-50px`;
+
+            gameArea.appendChild(el);
+
+            state.activeWords.push({
+                id: Date.now() + Math.random(),
+                word: wordText,
+                x: left,
+                y: -50,
+                el: el,
+                speedMultiplier: 0.8 + Math.random() * 0.4 // Variance in speed
+            });
+        }
+
+        function gameLoop(timestamp) {
+            if (!state.active || state.paused) return;
+
+            // Spawning
+            if (timestamp - state.lastSpawnTime > state.spawnTimer) {
+                spawnWord();
+                state.lastSpawnTime = timestamp;
+            }
+
+            // Movement & Collision
+            const removeIds = [];
+            const cityHeight = 200; // Approximate height of buildings
+            const groundLimit = window.innerHeight - cityHeight + 30; // Let them hit the buildings
+
+            state.activeWords.forEach(wordObj => {
+                // Move
+                wordObj.y += state.baseSpeed * wordObj.speedMultiplier;
+                wordObj.el.style.top = `${wordObj.y}px`;
+
+                // Check Bottom
+                if (wordObj.y > groundLimit) {
+                    // Miss
+                    handleMiss(wordObj);
+                    removeIds.push(wordObj.id);
+                }
+            });
+
+            // Cleanup
+            if (removeIds.length > 0) {
+                state.activeWords = state.activeWords.filter(w => !removeIds.includes(w.id));
+            }
+
+            if (state.active) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function handleInput(e) {
+            const val = input.value.toLowerCase().trim();
+            if (!val) {
+                clearHighlights();
+                return;
+            }
+
+            // Check for full match
+            const matchIndex = state.activeWords.findIndex(w => w.word === val);
+
+            if (matchIndex !== -1) {
+                // SUCCESS
+                const wordObj = state.activeWords[matchIndex];
+                destroyWord(wordObj);
+                state.activeWords.splice(matchIndex, 1);
+                
+                input.value = ''; // Auto clear
+                
+                // Update Stats
+                state.score += (val.length * 10) + (state.level * 5);
+                state.wordsCleared++;
+                state.keystrokesCorrect += val.length; // Credit the correct chars
+                state.streak++;
+                if (state.streak > state.maxStreak) state.maxStreak = state.streak;
+
+                checkLevelUp();
+                updateStats();
+                createParticles(wordObj.x, wordObj.y, val.length);
+
+            } else {
+                // PARTIAL MATCH LOGIC
+                // Highlight words that start with the input
+                let hasPartial = false;
+                state.activeWords.forEach(w => {
+                    if (w.word.startsWith(val)) {
+                        w.el.classList.add('highlight');
+                        hasPartial = true;
+                    } else {
+                        w.el.classList.remove('highlight');
+                    }
+                });
+
+                if (hasPartial) {
+                    // If the last keystroke contributed to a valid prefix, it's correct
+                    state.keystrokesCorrect++; 
+                } else {
+                    // Reset streak on bad typo? Maybe too harsh. Let's just break streak if enter pressed or something.
+                    // For now, just no highlight.
+                }
+            }
+        }
+
+        function clearHighlights() {
+            state.activeWords.forEach(w => w.el.classList.remove('highlight'));
+        }
+
+        function destroyWord(wordObj) {
+            playSound('match');
+            wordObj.el.classList.add('matched');
+            // Animate removal
+            const rect = wordObj.el.getBoundingClientRect();
+            wordObj.el.style.transform = `scale(1.5)`;
+            wordObj.el.style.opacity = `0`;
+            
+            setTimeout(() => {
+                if (wordObj.el.parentNode) wordObj.el.parentNode.removeChild(wordObj.el);
+            }, 200);
+        }
+
+        function handleMiss(wordObj) {
+            playSound('damage');
+            // Screen shake or red flash
+            document.body.classList.add('damage-effect');
+            setTimeout(() => document.body.classList.remove('damage-effect'), 500);
+
+            // Remove element
+            if (wordObj.el.parentNode) wordObj.el.parentNode.removeChild(wordObj.el);
+
+            // Reset streak
+            state.streak = 0;
+
+            // Lose Life
+            state.lives--;
+            renderLives();
+            
+            if (state.lives <= 0) {
+                gameOver();
+            }
+        }
+
+        function createParticles(x, y, amount) {
+            // Simple particle explosion
+            for (let i = 0; i < Math.min(amount + 3, 10); i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                p.style.left = `${x + 20}px`;
+                p.style.top = `${y + 10}px`;
+                p.style.width = `${Math.random() * 6 + 2}px`;
+                p.style.height = p.style.width;
+                
+                gameArea.appendChild(p);
+
+                // Animate
+                const destX = (Math.random() - 0.5) * 100;
+                const destY = (Math.random() - 0.5) * 100;
+
+                const anim = p.animate([
+                    { transform: 'translate(0,0)', opacity: 1 },
+                    { transform: `translate(${destX}px, ${destY}px)`, opacity: 0 }
+                ], {
+                    duration: 500 + Math.random() * 300,
+                    easing: 'cubic-bezier(0, .9, .57, 1)'
+                });
+
+                anim.onfinish = () => p.remove();
+            }
+        }
+
+        function checkLevelUp() {
+            if (state.wordsCleared > 0 && state.wordsCleared % CONFIG.levelThreshold === 0) {
+                state.level++;
+                state.baseSpeed += CONFIG.speedIncrement;
+                if (state.spawnTimer > 500) { // Cap max spawn rate
+                    state.spawnTimer -= CONFIG.rateDecrement;
+                }
+                
+                playSound('levelup');
+
+                // Visual notification
+                const notif = document.createElement('div');
+                notif.innerText = `LEVEL ${state.level}`;
+                notif.className = 'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-6xl font-bold text-cyan-400 z-50 animate-bounce';
+                gameArea.appendChild(notif);
+                setTimeout(() => notif.remove(), 2000);
+            }
+        }
+
+        function calculateAccuracy() {
+            if (state.keystrokesTotal === 0) return 100;
+            // A simplified accuracy: (Correct / Total) * 100
+            // Note: Total increments on every key press, correct increments on valid input events
+            // Since we increment 'correct' based on logic, we might need to clamp it
+            const acc = Math.round((state.keystrokesCorrect / state.keystrokesTotal) * 100);
+            return Math.min(100, Math.max(0, acc));
+        }
+
+        function updateStats() {
+            scoreEl.innerText = state.score;
+            levelEl.innerText = state.level;
+            accuracyEl.innerText = calculateAccuracy() + "%";
+            
+            let speedText = "Normal";
+            if (state.level > 3) speedText = "High";
+            if (state.level > 6) speedText = "Extreme";
+            if (state.level > 9) speedText = "Lethal";
+            speedEl.innerText = speedText;
+        }
+
+        function renderLives() {
+            livesContainer.innerHTML = '';
+            for (let i = 0; i < CONFIG.maxLives; i++) {
+                const heart = document.createElement('div');
+                // Using a simple block for "Shield" health or SVG
+                if (i < state.lives) {
+                    heart.className = 'w-6 h-4 bg-cyan-500 shadow-[0_0_10px_#00f3ff] skew-x-[-20deg]';
+                } else {
+                    heart.className = 'w-6 h-4 bg-gray-800 border border-gray-700 skew-x-[-20deg]';
+                }
+                livesContainer.appendChild(heart);
+            }
+        }
+
+        // Run Init
+        init();
+
+    </script>
+</body>
+</html>
